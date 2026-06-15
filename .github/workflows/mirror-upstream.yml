@@ -1,0 +1,93 @@
+name: Mirror upstream
+
+# Keeps this fork (VALM-Labs/BaiLongma) in sync with the upstream author's repo:
+#   - fast-forwards / merges the default branch
+#   - mirrors all tags
+#   - mirrors every Release plus its binary assets (.exe / .blockmap / latest.yml)
+#
+# Runs every 6 hours and can be started manually from the Actions tab.
+
+on:
+  schedule:
+    - cron: '23 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mirror-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: xiaoyuanda666-ship-it/BaiLongma
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync branch + tags from upstream
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "https://github.com/${UPSTREAM}.git"
+          git fetch upstream --prune --tags --force
+          git checkout main
+          if ! git merge --no-edit upstream/main; then
+            echo "::error::merge conflict with upstream/main — aborting"
+            git merge --abort
+            exit 1
+          fi
+          git push origin main
+          git push origin --tags --force
+
+      - name: Mirror releases (metadata + assets)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          DEST="${GITHUB_REPOSITORY}"
+          work="$(mktemp -d)"
+          gh api --paginate "repos/${UPSTREAM}/releases" \
+            --jq '.[] | select(.draft | not) | .tag_name' > "$work/tags.txt"
+          tac "$work/tags.txt" > "$work/tags.ordered.txt"
+
+          created=0; skipped=0; failed=0
+          while IFS= read -r tag; do
+            [ -z "$tag" ] && continue
+            if gh release view "$tag" --repo "$DEST" >/dev/null 2>&1; then
+              echo "skip (exists): $tag"; skipped=$((skipped+1)); continue
+            fi
+            echo "::group::mirror $tag"
+            rel="$(gh api "repos/${UPSTREAM}/releases/tags/${tag}")"
+            name="$(printf '%s' "$rel" | jq -r '.name // .tag_name')"
+            pre="$(printf '%s'  "$rel" | jq -r 'if .prerelease then "--prerelease" else empty end')"
+            printf '%s' "$rel" | jq -r '.body // ""' > "$work/notes.md"
+            dir="$work/dl"; rm -rf "$dir"; mkdir -p "$dir"
+            gh release download "$tag" --repo "$UPSTREAM" --dir "$dir" --clobber \
+              || echo "no downloadable assets for $tag"
+            shopt -s nullglob
+            files=("$dir"/*)
+            if gh release create "$tag" "${files[@]}" \
+                 --repo "$DEST" --title "$name" --notes-file "$work/notes.md" $pre; then
+              created=$((created+1))
+            else
+              echo "::error::failed to create release $tag"; failed=$((failed+1))
+            fi
+            rm -rf "$dir"
+            echo "::endgroup::"
+          done < "$work/tags.ordered.txt"
+
+          {
+            echo "## Release mirror summary"
+            echo "- created: $created"
+            echo "- skipped (already present): $skipped"
+            echo "- failed: $failed"
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$failed" -eq 0 ]
