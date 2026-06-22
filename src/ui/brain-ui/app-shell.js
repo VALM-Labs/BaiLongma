@@ -138,7 +138,7 @@ const createConsole = () => `
   <div id="input-row">
     <div id="slash-menu" class="slash-menu" role="listbox" aria-label="命令" hidden></div>
     <span class="prompt-mark">▸</span>
-    <input id="msg-input" type="text" placeholder="向 Longma 发送消息…（输入 / 调出命令）" autocomplete="off">
+    <textarea id="msg-input" rows="1" placeholder="向 Longma 发送消息…（输入 / 调出命令，Shift+Enter 换行）" autocomplete="off"></textarea>
     <button id="send-btn" type="button">发送</button>
   </div>
 </section>
@@ -188,6 +188,17 @@ const createSettingsModal = () => `
           <div class="settings-section">
             <div class="settings-section-label">主题</div>
             ${createThemeSwitcher()}
+          </div>
+          <div class="settings-section">
+            <div class="settings-section-label">AI 名字</div>
+            <div class="settings-row">
+              <label class="settings-label" for="settings-agent-name">显示名</label>
+              <input class="settings-input" id="settings-agent-name" type="text" maxlength="32" autocomplete="off" spellcheck="false" placeholder="小白龙">
+            </div>
+            <div class="settings-row-action">
+              <button class="settings-save-btn" id="settings-save-agent-name" type="button">保存</button>
+              <span class="settings-feedback" id="settings-agent-name-feedback"></span>
+            </div>
           </div>
           <div class="settings-section">
             <div class="settings-section-label">记忆节点图</div>
